@@ -8,9 +8,10 @@ import nibabel as nib
 import numpy as np
 import time
 
-from tigerhx import lib_hx
-from tigerhx import lib_tool
-
+# from tigerhx import lib_hx
+# from tigerhx import lib_tool
+import lib_hx
+import lib_tool
 
 def get_report(input_file, output_file):
     
@@ -69,6 +70,7 @@ def main():
     parser.add_argument('-o', '--output', default=None, help='File path for output segmentation, default: the directory of input files')
     parser.add_argument('-g', '--gpu', action='store_true', help='Using GPU')
     parser.add_argument('-r', '--report', action='store_true', help='Produce additional reports')
+    parser.add_argument('-s', '--sam', action='store_true', help='Using Segment Anything')
     parser.add_argument('--model', default=None, type=str,
                         help='Specifies the modelname')
 
@@ -83,6 +85,7 @@ def run(argstring, input, output=None, model=None):
 
     args.gpu = 'g' in argstring
     args.report = 'r' in argstring
+    args.sam = 's' in argstring
     if not isinstance(input, list):
         input = [input]
     args.input = input
@@ -104,13 +107,35 @@ def run_args(args):
 
     print('Total nii files:', len(input_file_list))
 
-    if args.model is None:
+    if args.sam is not None:
+        args.model = 'cine4d_xyz_sam_m12.onnx'
+    elif args.model is None:
         args.model = 'cine4d_xyz_v002_m12ac'
         #args.model = 'cine4d_xyz_v001_m12.onnx'
 
     model_name = lib_tool.get_model(args.model)
 
     result_list = []
+    
+    predictor = None
+    if args.sam:
+        from segment_anything import SamPredictor, sam_model_registry
+        import torch
+        
+        if getattr(sys, 'frozen', False):
+            application_path = os.path.dirname(sys.executable)
+        elif __file__:
+            application_path = os.path.dirname(os.path.abspath(__file__))
+
+        sam_path = join(application_path, 'models', 'sam_vit_h_4b8939.pth')
+        
+        sam_checkpoint = sam_path
+        model_type = "vit_h"
+        DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+        sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+        sam.to(device=DEVICE)
+        predictor = SamPredictor(sam)
 
     for f in input_file_list:
         result_dict = dict()
@@ -119,7 +144,7 @@ def run_args(args):
         t = time.time()
         input_data = nib.load(f).get_fdata()
         mask_pred = lib_hx.run(
-            model_name, input_data, GPU=args.gpu)
+            model_name, input_data, GPU=args.gpu, predictor=predictor)
         mask_pred = lib_hx.post(mask_pred)
         output_file = write_file(
              f, output_dir, mask_pred, postfix='hx')
@@ -139,4 +164,5 @@ def run_args(args):
         return result_list
 
 if __name__ == "__main__":
-    main()
+    # main()
+    run('gs', r'C:\Users\Tong\Desktop\123\patient101.nii.gz', r'C:\Users\Tong\Desktop\456')

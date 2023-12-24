@@ -220,3 +220,118 @@ def predict(model, data, GPU):
 
     return session.run(None, {session.get_inputs()[0].name: data.astype(data_type)}, )[0]
 
+def sam (data, mask_pred, softmax, predictor):
+    masks=mask_pred*0
+    for z in range(data.shape[-1]):
+        mask2d = mask_pred[...,z]
+        ss = softmax[1,:,:,z][mask2d==1]
+        p1 = sum(ss)/len(ss) if len(ss) > 0 else 1
+        ss = softmax[2,:,:,z][mask2d==2]
+        p2 = sum(ss)/len(ss) if len(ss) > 0 else 1
+        ss = softmax[3,:,:,z][mask2d==3]
+        p3 = sum(ss)/len(ss) if len(ss) > 0 else 1
+        
+        if p1 < 0.8 or p2 < 0.8  or p3 < 0.8:
+            image = data[...,z].astype(np.uint8)
+            image = np.stack([image] * 3, axis=-1)
+            predictor.set_image(image)
+            if p1 < 0.8:
+                input_point = []
+                for i in range(mask2d.shape[0]):#row
+                    for j in range(mask2d.shape[1]):#col
+                        if mask2d[i,j]==1:
+                            input_point.append([j,i])                
+                s=np.array(input_point)
+                input_box = np.array([np.min(s[:,0]), np.min(s[:,1]), np.max(s[:,0]), np.max(s[:,1])])
+                dd=[]
+                for i in range(15):
+                    dd.append(s[np.random.randint(len(s))])
+                input_point = np.array(dd)
+                input_label= np.ones(len(input_point))
+                
+                mask1, _, _ = predictor.predict(
+                    point_coords=input_point,
+                    point_labels=input_label,
+                    box=input_box[None, :],
+                    multimask_output=False,
+                )
+            else:
+                mask1=mask2d==1
+                
+            
+            if p2 < 0.8:
+                input_point = []
+                for i in range(mask2d.shape[0]):#row
+                    for j in range(mask2d.shape[1]):#col
+                        if mask2d[i,j]==2:
+                            input_point.append([j,i])
+                                
+                s=np.array(input_point)
+                input_box = np.array([np.min(s[:,0]), np.min(s[:,1]), np.max(s[:,0]), np.max(s[:,1])])
+                dd=[]
+                for i in range(15):
+                    dd.append(s[np.random.randint(len(s))])
+                input_point = np.array(dd)
+                input_label= np.ones(len(input_point))
+                
+                mask2, _, _ = predictor.predict(
+                    point_coords=input_point,
+                    point_labels=input_label,
+                    box=input_box[None, :],
+                    multimask_output=False,
+                )
+                mask2=mask2^((mask2d==1)&mask2)
+            else:
+                mask2=mask2d==2
+            
+            
+            if p3 < 0.8:
+                input_point = []
+                for i in range(mask2d.shape[0]):#row
+                    for j in range(mask2d.shape[1]):#col
+                        if mask2d[i,j]==3:
+                            input_point.append([j,i])
+                                
+                s=np.array(input_point)
+                input_box = np.array([np.min(s[:,0]), np.min(s[:,1]), np.max(s[:,0]), np.max(s[:,1])])
+                dd=[]
+                for i in range(15):
+                    dd.append(s[np.random.randint(len(s))])
+                input_point = np.array(dd)
+                input_label= np.ones(len(input_point))
+                
+                mask3, _, _ = predictor.predict(
+                    point_coords=input_point,
+                    point_labels=input_label,
+                    box=input_box[None, :],
+                    multimask_output=False,
+                )
+            else:
+                mask3=mask2d==3
+                
+            if p1 >= p2 and p1 >= p3:
+                mask3 = mask3^(mask3&mask1)
+                mask2 = mask2^(mask2&mask1)
+                if p2 >= p3:
+                    mask3 = mask3^(mask3&mask2)
+                else :
+                    mask2 = mask2^(mask3&mask2)
+            elif p2 > p1 and p2 >= p3:
+                mask3 = mask3^(mask3&mask2)
+                mask1 = mask1^(mask1&mask2)
+                if p1 >= p3:
+                    mask3 = mask3^(mask3&mask1)
+                else :
+                    mask1 = mask1^(mask3&mask1)  
+            elif p3 > p1 and p3 > p2:
+                mask2 = mask2^(mask3&mask2)
+                mask1 = mask1^(mask1&mask3)
+                if p1 >= p2:
+                    mask2 = mask2^(mask2&mask1)
+                else :
+                    mask1 = mask1^(mask2&mask1)
+                    
+            masks[:,:,z] = mask1*1 + mask2*2 + mask3*3
+        else:
+            masks[:,:,z] = mask2d
+    return masks

@@ -6,7 +6,8 @@ import nibabel as nib
 import onnxruntime as ort
 from scipy.special import softmax
 
-from tigerhx import lib_tool
+# from tigerhx import lib_tool
+import lib_tool
 nib.Nifti1Header.quaternion_threshold = -100
 
 
@@ -38,7 +39,7 @@ def post(mask):
     return masknew
 
 
-def run(model_ff, input_data, GPU):
+def run(model_ff, input_data, GPU, predictor):
     xyzt_mode, _, _ = get_mode(model_ff)
 
 
@@ -67,15 +68,26 @@ def run(model_ff, input_data, GPU):
         if np.max(image) == 0:
             continue
         image = image/np.max(image)
+        
+        if predictor != None:
+            image = image.swapaxes(0,4)
+            image = image.squeeze(4)
 
         logits = lib_tool.predict(model_ff, image, GPU)
+        
+        if predictor != None:
+            logits = np.expand_dims(logits,4)
+            logits = logits.swapaxes(0,4)
    
         #logits = session.run(None, {"modelInput": image.astype(np.float32)})[0]
         if xyzt_mode == 'xy2':
             mask_pred = post(np.argmax(logits[0, 1:5, ...], axis=0))
         else:
             mask_pred = post(np.argmax(logits[0, ...], axis=0))
-        #mask_softmax = softmax(logits[0, ...], axis=0)
+        
+        if predictor != None:
+            mask_softmax = softmax(logits[0, ...], axis=0)
+            mask_pred = lib_tool.sam(image_raw, mask_pred, mask_softmax, predictor)
 
         #print(xyzt_mode, tti, image.max(), mask_pred.max(), image.shape)
 
